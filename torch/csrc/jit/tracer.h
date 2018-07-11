@@ -48,11 +48,7 @@ inline ValueTracingStateElem* getValueState(const std::shared_ptr<TracingState>&
 
 inline bool isElemActive(const ValueTracingStateElem& vts) {
   auto state = vts.state.lock();
-  return state && state->active;
-}
-
-inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
-  return fmap(vars, &VariableFlags::of);
+  return static_cast<bool>(state);
 }
 
 } // namespace detail
@@ -142,7 +138,7 @@ inline std::shared_ptr<TracingState> getTracingState(const variable_list& vars) 
     if (!var.defined() || !var.has_tracing_state()) continue;
     for (auto & vts : var.tracing_state()) {
       auto var_state = vts.state.lock();
-      if (!var_state || !var_state->active) continue;
+      if (!var_state) continue;
       if (!state) state = var_state;
       JIT_ASSERT(var_state == state);
     }
@@ -214,8 +210,8 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
 // reference to at::Tensor buffer to call unsafeGetTH, but you can't get this
 // out of a const vector (silly std::vector...)
 inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
-    variable_list inputs, size_t num_stages) {
-  auto state = std::make_shared<TracingState>(num_stages);
+    variable_list inputs) {
+  auto state = std::make_shared<TracingState>();
   for (auto& input : inputs) {
     auto * value_state = detail::getValueState(state, input, false);
     if (value_state) {
@@ -226,9 +222,6 @@ inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
     setValueTrace(state, input, input_node);
     input_node->inferTypeFrom(input.data());
   }
-  state->var_flags[0].first = detail::getVarFlags(inputs);
-  state->active = true;
-  state->inputs = inputs;
   return std::make_pair(state, inputs);
 }
 
@@ -242,9 +235,6 @@ inline void exit(const variable_list& outputs) {
     state->graph->registerOutput(getOutputTrace(state, output, i));
     i++;
   }
-  state->active = false;
-  state->var_flags[state->graph->stage()].second = detail::getVarFlags(outputs);
-  state->inputs.clear();
 }
 
 // Pre-recorded information about the trace before we actually carry
